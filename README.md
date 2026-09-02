@@ -28,10 +28,9 @@ writing persistent settings.
 - USB Audio Class: UAC1
 - Known affected production era: 2020-2023
 
-The udev rule accepts any serial number for that exact device and firmware. The
-kernel-generated USB path becomes the systemd template instance. The service
-reads the serial from that device's sysfs directory, and the reset binary checks
-it again before the request is sent.
+At boot, the service accepts any serial number for that exact device and
+firmware. It reads each matching serial from sysfs, and the reset binary checks
+the device identity and serial again before the request is sent.
 
 This utility is intended for 2020-2023-era Blue Yeti Classic CR units using this
 hardware and firmware. Blue reused the Yeti name across revisions, so the year
@@ -52,32 +51,30 @@ For development installs from this checkout:
 make check
 sudo make install
 sudo systemctl daemon-reload
-sudo udevadm control --reload-rules
+sudo systemctl enable --now blue-yeti-autoreset.service
 ```
 
-The installation provides a static systemd template and a udev rule. It does
-not need to be enabled. On the next boot or USB reconnection, udev starts the
-appropriate instance automatically.
+The installation provides a systemd service that must be enabled once. It runs
+once during each boot after initial udev device processing has settled. USB
+reconnections later in the same boot do not trigger another automatic reset.
 
-To process an already connected microphone immediately:
+To enable automatic recovery starting with the next boot without resetting an
+already connected microphone immediately:
 
 ```sh
-sudo udevadm trigger --action=add --subsystem-match=usb \
-  --attr-match=idVendor=046d --attr-match=idProduct=0ab7
+sudo systemctl enable blue-yeti-autoreset.service
 ```
 
 ## How it works
 
-1. `udev/70-blue-yeti-autoreset.rules` matches a USB device add event for the
-   supported VID, PID, and firmware version.
-2. The rule starts an instance such as `blue-yeti-autoreset@1-2.1.service` using
-   the kernel-generated USB path, never untrusted descriptor text.
-3. The service waits one second for enumeration and driver binding to settle.
-4. The guard wrapper reads the serial from sysfs, records a timestamp under
-   `/run`, and invokes `blue-yeti-reset` with that serial.
-5. The binary verifies VID, PID, firmware version, and serial, temporarily
+1. `blue-yeti-autoreset.service` starts once during boot after initial udev
+   processing has settled.
+2. The wrapper scans sysfs for every device with the supported VID, PID,
+   firmware version, and a non-empty serial, then invokes `blue-yeti-reset` for
+   each serial.
+3. The binary verifies VID, PID, firmware version, and serial, temporarily
    detaches AudioControl interface 0, and claims it through libusb.
-6. It sends one fixed extension-unit `SET_CUR` request:
+4. It sends one fixed extension-unit `SET_CUR` request:
 
 ```text
 bmRequestType = 0x21
@@ -88,12 +85,9 @@ wLength       = 8
 payload       = 00 09 00 00 00 00 00 00
 ```
 
-7. The firmware resets and the microphone re-enumerates.
-8. The resulting second udev event consumes the fresh `/run` marker and exits
-   without resetting again. A systemd start limit is an additional loop guard.
-
-The `/run` marker is per USB path, is treated as stale after 15 seconds, and
-never persists across reboot. A failed or interrupted reset removes its marker.
+5. The firmware resets and the microphone re-enumerates. No hotplug rule starts
+   the service again, and `RemainAfterExit` keeps the successful service active
+   for the rest of the boot.
 
 ## Manual recovery
 
@@ -114,17 +108,17 @@ There is no option to select another opcode or supply an arbitrary payload.
 
 ## Logs
 
-List service instances and inspect this boot's recovery logs:
+Inspect the service state and this boot's recovery logs:
 
 ```sh
-systemctl list-units --all 'blue-yeti-autoreset@*'
-journalctl -b -u 'blue-yeti-autoreset@*'
+systemctl status blue-yeti-autoreset.service
+journalctl -b -u blue-yeti-autoreset.service
 ```
 
 ## Build and test
 
-Development dependencies are make, libusb, pkgconf, a C17 compiler,
-systemd/udev, and POSIX `sh`.
+Development dependencies are make, libusb, pkgconf, a C17 compiler, systemd,
+and POSIX `sh`.
 
 ```sh
 make
@@ -132,17 +126,18 @@ make check
 ```
 
 `make check` builds with strict warnings, verifies plan-only mode, checks shell
-syntax and loop-guard behavior, and validates the udev rule. It never sends a
-live USB request.
+syntax and boot-time device discovery, and validates the systemd unit. It never
+sends a live USB request.
 
 ## Limitations
 
-- Recovery is proactive after USB enumeration; it does not continuously sample
-  audio or diagnose unrelated capture failures.
+- Recovery is proactive once at boot; it does not react to later USB
+  reconnections, continuously sample audio, or diagnose unrelated capture
+  failures.
 - A reset briefly removes and recreates the ALSA and PipeWire devices.
 - Firmware versions other than `0.20` are intentionally rejected because their
   reset handlers have not been verified.
-- Automatic recovery requires systemd and udev.
+- Automatic recovery requires systemd.
 
 ## Cause of the bug
 

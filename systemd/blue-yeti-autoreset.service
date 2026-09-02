@@ -1,18 +1,14 @@
 [Unit]
-Description=Reset affected Blue Yeti after USB enumeration (%i)
+Description=Reset affected Blue Yeti once at boot
 Documentation=file:/usr/share/doc/blue-yeti-autoreset/README.md
-StartLimitIntervalSec=30
-StartLimitBurst=4
+Wants=systemd-udev-settle.service
+After=systemd-udev-settle.service
 
 [Service]
 Type=oneshot
-Environment=BLUE_YETI_DEVICE=%i
-Environment=BLUE_YETI_MARKER=/run/blue-yeti-autoreset/%i.suppress-next
-ExecStartPre=/usr/bin/sleep 1
 ExecStart=/usr/lib/blue-yeti-autoreset/blue-yeti-autoreset
-TimeoutStartSec=20
-RuntimeDirectory=blue-yeti-autoreset
-RuntimeDirectoryPreserve=yes
+RemainAfterExit=yes
+TimeoutStartSec=30
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
@@ -27,4 +23,6 @@ RestrictSUIDSGID=yes
 RestrictNamespaces=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
-ReadWritePaths=/run/blue-yeti-autoreset
+
+[Install]
+WantedBy=multi-user.target

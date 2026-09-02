@@ -3,74 +3,44 @@
 set -eu
 
 reset_tool=${BLUE_YETI_RESET_TOOL:-/usr/bin/blue-yeti-reset}
-marker=${BLUE_YETI_MARKER:-/run/blue-yeti-autoreset.suppress-next}
-suppress_seconds=${BLUE_YETI_SUPPRESS_SECONDS:-15}
-marker_armed=0
+sysfs_root=${BLUE_YETI_SYSFS_ROOT:-/sys/bus/usb/devices}
+found=0
+failed=0
 
-cleanup_marker()
-{
-    if [ "$marker_armed" -eq 1 ]; then
-        rm -f "$marker"
+for device in "$sysfs_root"/*
+do
+    [ -d "$device" ] || continue
+    [ -r "$device/idVendor" ] || continue
+    [ -r "$device/idProduct" ] || continue
+    [ -r "$device/bcdDevice" ] || continue
+    [ -r "$device/serial" ] || continue
+
+    id_vendor=
+    id_product=
+    bcd_device=
+    serial=
+    IFS= read -r id_vendor < "$device/idVendor" || continue
+    IFS= read -r id_product < "$device/idProduct" || continue
+    IFS= read -r bcd_device < "$device/bcdDevice" || continue
+    IFS= read -r serial < "$device/serial" || continue
+
+    if [ "$id_vendor" != 046d ] || [ "$id_product" != 0ab7 ] ||
+        [ "$bcd_device" != 0020 ] || [ -z "$serial" ]; then
+        continue
     fi
-}
 
-trap cleanup_marker 0
-trap 'exit 1' HUP INT TERM
-
-serial=${BLUE_YETI_SERIAL:-}
-if [ -z "$serial" ]; then
-    device=${BLUE_YETI_DEVICE:?BLUE_YETI_DEVICE or BLUE_YETI_SERIAL is required}
-    case "$device" in
-        ''|*[!A-Za-z0-9._:-]*)
-            printf '%s\n' "Invalid USB device path: $device" >&2
-            exit 1
-            ;;
-    esac
-    sysfs_root=${BLUE_YETI_SYSFS_ROOT:-/sys/bus/usb/devices}
-    serial_file=$sysfs_root/$device/serial
-    if [ ! -r "$serial_file" ]; then
-        printf '%s\n' "Unable to read USB serial from $serial_file" >&2
-        exit 1
+    found=1
+    if "$reset_tool" --execute-reset --serial "$serial"; then
+        printf '%s\n' "Automatic Blue Yeti reset accepted for serial $serial."
+    else
+        failed=1
     fi
-    IFS= read -r serial < "$serial_file"
+done
+
+if [ "$found" -eq 0 ]; then
+    printf '%s\n' "No supported Blue Yeti found; nothing to reset."
 fi
 
-if [ -z "$serial" ]; then
-    printf '%s\n' "The matching USB device has no serial." >&2
+if [ "$failed" -ne 0 ]; then
     exit 1
 fi
-
-case "$suppress_seconds" in
-    ''|*[!0-9]*)
-        printf '%s\n' "BLUE_YETI_SUPPRESS_SECONDS must be a non-negative integer." >&2
-        exit 1
-        ;;
-esac
-
-now=$(date +%s)
-if [ -r "$marker" ]; then
-    timestamp=
-    IFS= read -r timestamp < "$marker" || true
-    rm -f "$marker"
-    case "$timestamp" in
-        ''|*[!0-9]*) timestamp=0 ;;
-    esac
-    age=$((now - timestamp))
-    if [ "$age" -ge 0 ] && [ "$age" -le "$suppress_seconds" ]; then
-        printf '%s\n' "Skipping the expected post-reset re-enumeration."
-        exit 0
-    fi
-fi
-
-umask 077
-marker_armed=1
-printf '%s\n' "$now" > "$marker"
-if "$reset_tool" --execute-reset --serial "$serial"; then
-    marker_armed=0
-    printf '%s\n' "Automatic Blue Yeti reset accepted for serial $serial."
-    exit 0
-fi
-
-rm -f "$marker"
-marker_armed=0
-exit 1

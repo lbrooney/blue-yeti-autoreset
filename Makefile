@@ -5,7 +5,6 @@ INSTALL ?= install
 bindir = /usr/bin
 libexecdir = /usr/lib/blue-yeti-autoreset
 systemdunitdir = /usr/lib/systemd/system
-udevrulesdir = /usr/lib/udev/rules.d
 docdir = /usr/share/doc/blue-yeti-autoreset
 licensedir = /usr/share/licenses/blue-yeti-autoreset
 
@@ -26,19 +25,17 @@ build/blue-yeti-reset: src/blue-yeti-reset.c | build
 
 check: build/blue-yeti-reset
 	./build/blue-yeti-reset >/dev/null
-	sh -n scripts/blue-yeti-autoreset tests/check-guard.sh
-	sh ./tests/check-guard.sh
-	udevadm verify --no-style udev/70-blue-yeti-autoreset.rules
+	sh -n scripts/blue-yeti-autoreset tests/check-autoreset.sh
+	sh ./tests/check-autoreset.sh
+	systemd-analyze verify systemd/blue-yeti-autoreset.service
 
 install: build/blue-yeti-reset
 	$(INSTALL) -D -m 0755 build/blue-yeti-reset \
 		"$(DESTDIR)$(bindir)/blue-yeti-reset"
 	$(INSTALL) -D -m 0755 scripts/blue-yeti-autoreset \
 		"$(DESTDIR)$(libexecdir)/blue-yeti-autoreset"
-	$(INSTALL) -D -m 0644 systemd/blue-yeti-autoreset@.service \
-		"$(DESTDIR)$(systemdunitdir)/blue-yeti-autoreset@.service"
-	$(INSTALL) -D -m 0644 udev/70-blue-yeti-autoreset.rules \
-		"$(DESTDIR)$(udevrulesdir)/70-blue-yeti-autoreset.rules"
+	$(INSTALL) -D -m 0644 systemd/blue-yeti-autoreset.service \
+		"$(DESTDIR)$(systemdunitdir)/blue-yeti-autoreset.service"
 	$(INSTALL) -D -m 0644 README.md "$(DESTDIR)$(docdir)/README.md"
 	$(INSTALL) -D -m 0644 LICENSE "$(DESTDIR)$(licensedir)/LICENSE"
 

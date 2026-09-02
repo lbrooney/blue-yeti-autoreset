@@ -1,2 +1,0 @@
-# Use the kernel-generated USB path as the safe systemd template instance.
-ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="046d", ATTR{idProduct}=="0ab7", ATTR{bcdDevice}=="0020", ATTR{serial}!="", TAG+="systemd", ENV{SYSTEMD_WANTS}+="blue-yeti-autoreset@$kernel.service"
